@@ -899,13 +899,16 @@ This escape sequence is only 3 bytes long, and uses the H command (Cursor Positi
 ### Clear the screen on exit
 
 Let’s clear the screen and reposition the cursor when our program exits. If an error occurs in the middle of rendering the screen, we don’t want a bunch of garbage left over on the screen, and we don’t want the error to be printed wherever the cursor happens to be at that point.
-kilo.c
-Step 24
-clean-exit
 
+__kilo.c Step 24 clean-exit__
+
+```c
 /*** includes ***/
+
 /*** defines ***/
+
 /*** data ***/
+
 /*** terminal ***/
 void die(const char *s) {
   write(STDOUT_FILENO, "\x1b[2J", 4);
@@ -913,10 +916,15 @@ void die(const char *s) {
   perror(s);
   exit(1);
 }
+
 void disableRawMode() { … }
+
 void enableRawMode() { … }
+
 char editorReadKey() { … }
+
 /*** output ***/
+
 /*** input ***/
 void editorProcessKeypress() {
   char c = editorReadKey();
@@ -928,24 +936,29 @@ void editorProcessKeypress() {
       break;
   }
 }
-/*** init ***/
 
-♐︎ compiles
+/*** init ***/
+```
 
 We have two exit points we want to clear the screen at: die(), and when the user presses Ctrl-Q to quit.
 
 We could use atexit() to clear the screen when our program exits, but then the error message printed by die() would get erased right after printing it.
-Tildes
+
+### Tildes
 
 It’s time to start drawing. Let’s draw a column of tildes (~) on the left hand side of the screen, like vim does. In our text editor, we’ll draw a tilde at the beginning of any lines that come after the end of the file being edited.
-kilo.c
-Step 25
-tildes
 
+__kilo.c Step 25 tildes__
+
+```c
 /*** includes ***/
+
 /*** defines ***/
+
 /*** data ***/
+
 /*** terminal ***/
+
 /*** output ***/
 void editorDrawRows() {
   int y;
@@ -953,16 +966,18 @@ void editorDrawRows() {
     write(STDOUT_FILENO, "~\r\n", 3);
   }
 }
+
 void editorRefreshScreen() {
   write(STDOUT_FILENO, "\x1b[2J", 4);
   write(STDOUT_FILENO, "\x1b[H", 3);
   editorDrawRows();
   write(STDOUT_FILENO, "\x1b[H", 3);
 }
-/*** input ***/
-/*** init ***/
 
-♐︎ compiles
+/*** input ***/
+
+/*** init ***/
+```
 
 editorDrawRows() will handle drawing each row of the buffer of text being edited. For now it draws a tilde in each row, which means that row is not part of the file and can’t contain any text.
 
