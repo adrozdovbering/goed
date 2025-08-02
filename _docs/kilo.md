@@ -1,3 +1,7 @@
+https://viewsourcecode.org/snaptoken/kilo/01.setup.html
+
+
+
 # Build Your Own Text Editor
 
 Welcome! This is an instruction booklet that shows you how to build a text editor in C.
@@ -984,29 +988,38 @@ editorDrawRows() will handle drawing each row of the buffer of text being edited
 We don’t know the size of the terminal yet, so we don’t know how many rows to draw. For now we just draw 24 rows.
 
 After we’re done drawing, we do another <esc>[H escape sequence to reposition the cursor back up at the top-left corner.
-Global state
+
+### Global state
 
 Our next goal is to get the size of the terminal, so we know how many rows to draw in editorDrawRows(). But first, let’s set up a global struct that will contain our editor state, which we’ll use to store the width and height of the terminal. For now, let’s just put our orig_termios global into the struct.
-kilo.c
-Step 26
-global-state
 
+
+__kilo.c Step 26 global-state__
+
+```c
 /*** includes ***/
 /*** defines ***/
 /*** data ***/
+
 struct editorConfig {
   struct termios orig_termios;
 };
+
 struct editorConfig E;
+
 /*** terminal ***/
+
 void die(const char *s) { … }
+
 void disableRawMode() {
   if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &E.orig_termios) == -1)
     die("tcsetattr");
 }
+
 void enableRawMode() {
   if (tcgetattr(STDIN_FILENO, &E.orig_termios) == -1) die("tcgetattr");
   atexit(disableRawMode);
+  
   struct termios raw = E.orig_termios;
   raw.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
   raw.c_oflag &= ~(OPOST);
@@ -1014,23 +1027,26 @@ void enableRawMode() {
   raw.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
   raw.c_cc[VMIN] = 0;
   raw.c_cc[VTIME] = 1;
+  
   if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) die("tcsetattr");
 }
+
 char editorReadKey() { … }
+
 /*** output ***/
 /*** input ***/
 /*** init ***/
-
-♎︎ compiles, but with no observable effects
+```
 
 Our global variable containing our editor state is named E. We must replace all occurrences of orig_termios with E.orig_termios.
-Window size, the easy way
+
+### Window size, the easy way
 
 On most systems, you should be able to get the size of the terminal by simply calling ioctl() with the TIOCGWINSZ request. (As far as I can tell, it stands for Terminal IOCtl (which itself stands for Input/Output Control) Get WINdow SiZe.)
-kilo.c
-Step 27
-ioctl
 
+__kilo.c Step 27 ioctl__
+
+```c
 /*** includes ***/
 #include <ctype.h>
 #include <errno.h>
@@ -1039,13 +1055,19 @@ ioctl
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
+
 /*** defines ***/
 /*** data ***/
 /*** terminal ***/
+
 void die(const char *s) { … }
+
 void disableRawMode() { … }
+
 void enableRawMode() { … }
+
 char editorReadKey() { … }
+
 int getWindowSize(int *rows, int *cols) {
   struct winsize ws;
   if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) {
@@ -1055,94 +1077,109 @@ int getWindowSize(int *rows, int *cols) {
     *rows = ws.ws_row;
     return 0;
   }
+
 }
 /*** output ***/
 /*** input ***/
 /*** init ***/
-
-♎︎ compiles, but with no observable effects
+```
 
 ioctl(), TIOCGWINSZ, and struct winsize come from <sys/ioctl.h>.
 
 On success, ioctl() will place the number of columns wide and the number of rows high the terminal is into the given winsize struct. On failure, ioctl() returns -1. We also check to make sure the values it gave back weren’t 0, because apparently that’s a possible erroneous outcome. If ioctl() failed in either way, we have getWindowSize() report failure by returning -1. If it succeeded, we pass the values back by setting the int references that were passed to the function. (This is a common approach to having functions return multiple values in C. It also allows you to use the return value to indicate success or failure.)
 
 Now let’s add screenrows and screencols to our global editor state, and call getWindowSize() to fill in those values.
-kilo.c
-Step 28
-init-editor
 
+__kilo.c Step 28 init-editor__
+
+```c
 /*** includes ***/
 /*** defines ***/
 /*** data ***/
+
 struct editorConfig {
   int screenrows;
   int screencols;
   struct termios orig_termios;
 };
+
 struct editorConfig E;
+
 /*** terminal ***/
 /*** output ***/
 /*** input ***/
 /*** init ***/
+
 void initEditor() {
   if (getWindowSize(&E.screenrows, &E.screencols) == -1) die("getWindowSize");
 }
+
 int main() {
   enableRawMode();
   initEditor();
-  while (1) {
+
+while (1) {
     editorRefreshScreen();
     editorProcessKeypress();
   }
   return 0;
 }
-
-♎︎ compiles, but with no observable effects
+```
 
 initEditor()’s job will be to initialize all the fields in the E struct.
 
 Now we’re ready to display the proper number of tildes on the screen:
-kilo.c
-Step 29
-screenrows
 
+__kilo.c Step 29 screenrows__
+
+```c
 /*** includes ***/
 /*** defines ***/
 /*** data ***/
 /*** terminal ***/
 /*** output ***/
+
 void editorDrawRows() {
   int y;
+  
   for (y = 0; y < E.screenrows; y++) {
     write(STDOUT_FILENO, "~\r\n", 3);
   }
 }
+
 void editorRefreshScreen() { … }
+
 /*** input ***/
 /*** init ***/
+```
 
-♐︎ compiles
-Window size, the hard way
+### Window size, the hard way
 
 ioctl() isn’t guaranteed to be able to request the window size on all systems, so we are going to provide a fallback method of getting the window size.
 
 The strategy is to position the cursor at the bottom-right of the screen, then use escape sequences that let us query the position of the cursor. That tells us how many rows and columns there must be on the screen.
 
 Let’s start by moving the cursor to the bottom-right.
-kilo.c
-Step 30
-bottom-right
 
+__kilo.c Step 30 bottom-right__
+
+```c
 /*** includes ***/
 /*** defines ***/
 /*** data ***/
 /*** terminal ***/
+
 void die(const char *s) { … }
+
 void disableRawMode() { … }
+
 void enableRawMode() { … }
+
 char editorReadKey() { … }
+
 int getWindowSize(int *rows, int *cols) {
   struct winsize ws;
+  
   if (1 || ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) {
     if (write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12) return -1;
     editorReadKey();
@@ -1153,11 +1190,11 @@ int getWindowSize(int *rows, int *cols) {
     return 0;
   }
 }
+
 /*** output ***/
 /*** input ***/
 /*** init ***/
-
-♐︎ compiles
+```
 
 As you might have gathered from the code, there is no simple “move the cursor to the bottom-right corner” command.
 
@@ -1170,22 +1207,29 @@ Note that we are sticking a 1 || at the front of our if condition temporarily, s
 Because we’re always returning -1 (meaning an error occurred) from getWindowSize() at this point, we make a call to editorReadKey() so we can observe the results of our escape sequences before the program calls die() and clears the screen. When you run the program, you should see the cursor is positioned at the bottom-right corner of the screen, and then when you press a key you’ll see the error message printed by die() after it clears the screen.
 
 Next we need to get the cursor position. The n command (Device Status Report) can be used to query the terminal for status information. We want to give it an argument of 6 to ask for the cursor position. Then we can read the reply from the standard input. Let’s print out each character from the standard input to see what the reply looks like.
-kilo.c
-Step 31
-cursor-query
 
+__kilo.c Step 31 cursor-query__
+
+```c
 /*** includes ***/
 /*** defines ***/
 /*** data ***/
 /*** terminal ***/
+
 void die(const char *s) { … }
+
 void disableRawMode() { … }
+
 void enableRawMode() { … }
+
 char editorReadKey() { … }
+
 int getCursorPosition(int *rows, int *cols) {
   if (write(STDOUT_FILENO, "\x1b[6n", 4) != 4) return -1;
+  
   printf("\r\n");
   char c;
+  
   while (read(STDIN_FILENO, &c, 1) == 1) {
     if (iscntrl(c)) {
       printf("%d\r\n", c);
@@ -1193,11 +1237,14 @@ int getCursorPosition(int *rows, int *cols) {
       printf("%d ('%c')\r\n", c, c);
     }
   }
+  
   editorReadKey();
   return -1;
 }
+
 int getWindowSize(int *rows, int *cols) {
   struct winsize ws;
+  
   if (1 || ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) {
     if (write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12) return -1;
     return getCursorPosition(rows, cols);
@@ -1207,11 +1254,11 @@ int getWindowSize(int *rows, int *cols) {
     return 0;
   }
 }
+
 /*** output ***/
 /*** input ***/
 /*** init ***/
-
-♐︎ compiles
+```
 
 The reply is an escape sequence! It’s an escape character (27), followed by a [ character, and then the actual response: 24;80R, or similar. (This escape sequence is documented as Cursor Position Report.)
 
@@ -1220,74 +1267,97 @@ As before, we’ve inserted a temporary call to editorReadKey() to let us observ
 (Note: If you’re using Bash on Windows, read() doesn’t time out so you’ll be stuck in an infinite loop. You’ll have to kill the process externally, or exit and reopen the command prompt window.)
 
 We’re going to have to parse this response. But first, let’s read it into a buffer. We’ll keep reading characters until we get to the R character.
-kilo.c
-Step 32
-response-buffer
 
+__kilo.c Step 32 response-buffer__
+
+```c
 /*** includes ***/
 /*** defines ***/
 /*** data ***/
 /*** terminal ***/
+
 void die(const char *s) { … }
+
 void disableRawMode() { … }
+
 void enableRawMode() { … }
+
 char editorReadKey() { … }
+
 int getCursorPosition(int *rows, int *cols) {
   char buf[32];
   unsigned int i = 0;
+  
   if (write(STDOUT_FILENO, "\x1b[6n", 4) != 4) return -1;
+  
   while (i < sizeof(buf) - 1) {
     if (read(STDIN_FILENO, &buf[i], 1) != 1) break;
     if (buf[i] == 'R') break;
     i++;
   }
+  
   buf[i] = '\0';
   printf("\r\n&buf[1]: '%s'\r\n", &buf[1]);
+  
   editorReadKey();
+  
   return -1;
 }
+
 int getWindowSize(int *rows, int *cols) { … }
+
 /*** output ***/
 /*** input ***/
 /*** init ***/
-
-♐︎ compiles
+```
 
 When we print out the buffer, we don’t want to print the '\x1b' character, because the terminal would interpret it as an escape sequence and wouldn’t display it. So we skip the first character in buf by passing &buf[1] to printf(). printf() expects strings to end with a 0 byte, so we make sure to assign '\0' to the final byte of buf.
 
 If you run the program, you’ll see we have the response in buf in the form of <esc>[24;80. Let’s parse the two numbers out of there using sscanf():
-kilo.c
-Step 33
-parse-response
 
+__kilo.c Step 33 parse-response__
+
+```c
 /*** includes ***/
 /*** defines ***/
 /*** data ***/
 /*** terminal ***/
+
 void die(const char *s) { … }
+
 void disableRawMode() { … }
+
 void enableRawMode() { … }
+
 char editorReadKey() { … }
+
 int getCursorPosition(int *rows, int *cols) {
   char buf[32];
   unsigned int i = 0;
+  
   if (write(STDOUT_FILENO, "\x1b[6n", 4) != 4) return -1;
+  
   while (i < sizeof(buf) - 1) {
     if (read(STDIN_FILENO, &buf[i], 1) != 1) break;
     if (buf[i] == 'R') break;
     i++;
   }
+  
   buf[i] = '\0';
+  
   if (buf[0] != '\x1b' || buf[1] != '[') return -1;
+  
   if (sscanf(&buf[2], "%d;%d", rows, cols) != 2) return -1;
+  
   return 0;
 }
+
 int getWindowSize(int *rows, int *cols) { … }
+
 /*** output ***/
 /*** input ***/
 /*** init ***/
-
-♐︎ compiles
+```
 
 sscanf() comes from <stdio.h>.
 
@@ -1296,21 +1366,28 @@ First we make sure it responded with an escape sequence. Then we pass a pointer 
 Our fallback method for getting the window size is now complete. You should see that editorDrawRows() prints the correct number of tildes for the height of your terminal.
 
 Now that we know that works, let’s remove the 1 || we put in the if condition temporarily.
-kilo.c
-Step 34
-back-to-ioctl
 
+__kilo.c Step 34 back-to-ioctl__
+
+```c
 /*** includes ***/
 /*** defines ***/
 /*** data ***/
 /*** terminal ***/
+
 void die(const char *s) { … }
+
 void disableRawMode() { … }
+
 void enableRawMode() { … }
+
 char editorReadKey() { … }
+
 int getCursorPosition(int *rows, int *cols) { … }
+
 int getWindowSize(int *rows, int *cols) {
   struct winsize ws;
+  
   if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) {
     if (write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12) return -1;
     return getCursorPosition(rows, cols);
@@ -1320,25 +1397,27 @@ int getWindowSize(int *rows, int *cols) {
     return 0;
   }
 }
+
 /*** output ***/
 /*** input ***/
 /*** init ***/
 
-♎︎ compiles, but with no observable effects
-The last line
+### The last line
 
 Maybe you noticed the last line of the screen doesn’t seem to have a tilde. That’s because of a small bug in our code. When we print the final tilde, we then print a "\r\n" like on any other line, but this causes the terminal to scroll in order to make room for a new, blank line. Let’s make the last line an exception when we print our "\r\n"’s.
-kilo.c
-Step 35
-last-line
 
+__kilo.c Step 35 last-line__
+
+```c
 /*** includes ***/
 /*** defines ***/
 /*** data ***/
 /*** terminal ***/
 /*** output ***/
+
 void editorDrawRows() {
   int y;
+  
   for (y = 0; y < E.screenrows; y++) {
     write(STDOUT_FILENO, "~", 1);
     if (y < E.screenrows - 1) {
@@ -1346,51 +1425,62 @@ void editorDrawRows() {
     }
   }
 }
+
 void editorRefreshScreen() { … }
+
 /*** input ***/
 /*** init ***/
+```
 
-♐︎ compiles
-Append buffer
+### Append buffer
 
 It’s not a good idea to make a whole bunch of small write()’s every time we refresh the screen. It would be better to do one big write(), to make sure the whole screen updates at once. Otherwise there could be small unpredictable pauses between write()’s, which would cause an annoying flicker effect.
 
 We want to replace all our write() calls with code that appends the string to a buffer, and then write() this buffer out at the end. Unfortunately, C doesn’t have dynamic strings, so we’ll create our own dynamic string type that supports one operation: appending.
 
-Let’s start by making a new /*** append buffer ***/ section, and defining the abuf struct under it.
-kilo.c
-Step 36
-abuf-struct
+Let’s start by making a new `/*** append buffer ***/` section, and defining the abuf struct under it.
 
+__kilo.c Step 36 abuf-struct__
+
+```c
 /*** includes ***/
 /*** defines ***/
 /*** data ***/
 /*** terminal ***/
+
 void die(const char *s) { … }
+
 void disableRawMode() { … }
+
 void enableRawMode() { … }
+
 char editorReadKey() { … }
+
 int getCursorPosition(int *rows, int *cols) { … }
+
 int getWindowSize(int *rows, int *cols) { … }
+
 /*** append buffer ***/
+
 struct abuf {
   char *b;
   int len;
 };
+
 #define ABUF_INIT {NULL, 0}
+
 /*** output ***/
 /*** input ***/
 /*** init ***/
-
-♎︎ compiles, but with no observable effects
+```
 
 An append buffer consists of a pointer to our buffer in memory, and a length. We define an ABUF_INIT constant which represents an empty buffer. This acts as a constructor for our abuf type.
 
 Next, let’s define the abAppend() operation, as well as the abFree() destructor.
-kilo.c
-Step 37
-abuf-append
 
+__kilo.c Step 37 abuf-append__
+
+```c
 /*** includes ***/
 #include <ctype.h>
 #include <errno.h>
@@ -1400,12 +1490,19 @@ abuf-append
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
+
 /*** defines ***/
+
 /*** data ***/
+
 /*** terminal ***/
+
 /*** append buffer ***/
+
 struct abuf { … };
+
 #define ABUF_INIT {NULL, 0}
+
 void abAppend(struct abuf *ab, const char *s, int len) {
   char *new = realloc(ab->b, ab->len + len);
   if (new == NULL) return;
@@ -1413,14 +1510,15 @@ void abAppend(struct abuf *ab, const char *s, int len) {
   ab->b = new;
   ab->len += len;
 }
+
 void abFree(struct abuf *ab) {
   free(ab->b);
 }
+
 /*** output ***/
 /*** input ***/
 /*** init ***/
-
-♎︎ compiles, but with no observable effects
+```
 
 realloc() and free() come from <stdlib.h>. memcpy() comes from <string.h>.
 
@@ -1431,18 +1529,20 @@ Then we use memcpy() to copy the string s after the end of the current data in t
 abFree() is a destructor that deallocates the dynamic memory used by an abuf.
 
 Okay, our abuf type is ready to be put to use.
-kilo.c
-Step 38
-use-abuf
 
+__kilo.c Step 38 use-abuf__
+
+```c
 /*** includes ***/
 /*** defines ***/
 /*** data ***/
 /*** terminal ***/
 /*** append buffer ***/
 /*** output ***/
+
 void editorDrawRows(struct abuf *ab) {
   int y;
+  
   for (y = 0; y < E.screenrows; y++) {
     abAppend(ab, "~", 1);
     if (y < E.screenrows - 1) {
@@ -1450,22 +1550,29 @@ void editorDrawRows(struct abuf *ab) {
     }
   }
 }
+
 void editorRefreshScreen() {
   struct abuf ab = ABUF_INIT;
+  
   abAppend(&ab, "\x1b[2J", 4);
   abAppend(&ab, "\x1b[H", 3);
+  
   editorDrawRows(&ab);
+  
   abAppend(&ab, "\x1b[H", 3);
+  
   write(STDOUT_FILENO, ab.b, ab.len);
+  
   abFree(&ab);
 }
+
 /*** input ***/
 /*** init ***/
-
-♎︎ compiles, but with no observable effects
+```
 
 In editorRefreshScreen(), we first initialize a new abuf called ab, by assigning ABUF_INIT to it. We then replace each occurrence of write(STDOUT_FILENO, ...) with abAppend(&ab, ...). We also pass ab into editorDrawRows(), so it too can use abAppend(). Lastly, we write() the buffer’s contents out to standard output, and free the memory used by the abuf.
-Hide the cursor when repainting
+
+### Hide the cursor when repainting
 
 There is another possible source of the annoying flicker effect we will take care of now. It’s possible that the cursor might be displayed in the middle of the screen somewhere for a split second while the terminal is drawing to the screen. To make sure that doesn’t happen, let’s hide the cursor before refreshing the screen, and show it again immediately after the refresh finishes.
 kilo.c
